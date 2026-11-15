@@ -1,0 +1,21 @@
+name: Validate
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash -n prayer-fetch.sh
+      - run: node --test tests/*.test.cjs
+      - name: Check root manifest
+        run: |
+          jq -e '.schemaVersion == 1 and .id == "thabetfy.prayer-times" and .kinds == ["bar-widget"] and .entryPoints.barWidget == "BarWidget.qml"' manifest.json
+      # Full Omarchy validation and QML lint run locally on an Omarchy system;
+      # this offline workflow does not install or run the desktop shell.
