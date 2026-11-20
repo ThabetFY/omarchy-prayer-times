@@ -9,15 +9,18 @@ Rectangle {
     property string label: ""
     property string description: ""
     property bool checked: false
-    property string fontFamily: Style.font.family
+    property string fontFamily: control.fontTokens.family
     property color foreground: Commons.Color.foreground
+    readonly property var fontTokens: Style.font
+    readonly property var spacingTokens: Style.spacing
+    readonly property var popupColors: Commons.Color.popups
     signal clicked()
 
-    implicitHeight: Math.max(Style.space(72), labels.implicitHeight + Style.spacing.rowPaddingX * 2, track.implicitHeight + Style.spacing.rowPaddingX * 2)
+    implicitHeight: Math.max(Style.space(72), labels.implicitHeight + control.spacingTokens.rowPaddingX * 2, track.implicitHeight + control.spacingTokens.rowPaddingX * 2)
     radius: Style.cornerRadius
-    color: Qt.tint(Commons.Color.popups.background,
+    color: Qt.tint(control.popupColors.background,
         Util.alpha(foreground, activeFocus || mouse.containsMouse ? 0.085 : 0.055))
-    border.width: activeFocus ? Style.spacing.hairline : 0
+    border.width: activeFocus ? control.spacingTokens.hairline : 0
     border.color: Commons.Color.accent
     activeFocusOnTab: true
     Keys.onReturnPressed: clicked()
@@ -28,10 +31,10 @@ Rectangle {
         id: labels
         anchors.left: parent.left
         anchors.right: track.left
-        anchors.leftMargin: Style.spacing.rowPaddingX
-        anchors.rightMargin: Style.spacing.rowPaddingX
+        anchors.leftMargin: control.spacingTokens.rowPaddingX
+        anchors.rightMargin: control.spacingTokens.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.spacing.xs
+        spacing: control.spacingTokens.xs
 
         Text {
             textFormat: Text.PlainText
@@ -41,7 +44,7 @@ Rectangle {
             horizontalAlignment: Text.AlignLeft
             color: control.foreground
             font.family: control.fontFamily
-            font.pixelSize: Style.font.heading
+            font.pixelSize: control.fontTokens.heading
             font.weight: Font.DemiBold
         }
         Text {
@@ -53,13 +56,13 @@ Rectangle {
             horizontalAlignment: Text.AlignLeft
             color: Qt.darker(control.foreground, 1.55)
             font.family: control.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: control.fontTokens.caption
         }
     }
     ToggleSwitch {
         id: track
         anchors.right: parent.right
-        anchors.rightMargin: Style.spacing.rowPaddingX
+        anchors.rightMargin: control.spacingTokens.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
         checked: control.checked
         foreground: control.foreground

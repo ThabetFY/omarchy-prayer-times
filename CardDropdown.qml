@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
@@ -9,18 +11,21 @@ Rectangle {
     property string label: ""
     property string value: ""
     property var options: []
-    property string fontFamily: Style.font.family
+    property string fontFamily: control.fontTokens.family
     property color foreground: Commons.Color.foreground
     readonly property int selectedIndex: options.findIndex(function(option) { return option.value === control.value; })
+    readonly property var fontTokens: Style.font
+    readonly property var spacingTokens: Style.spacing
+    readonly property var popupColors: Commons.Color.popups
     signal changed(string value)
 
     function close() { popup.close(); }
 
     implicitHeight: Style.space(72)
     radius: Style.cornerRadius
-    color: Qt.tint(Commons.Color.popups.background,
+    color: Qt.tint(control.popupColors.background,
         Util.alpha(foreground, activeFocus || mouse.containsMouse || popup.opened ? 0.085 : 0.055))
-    border.width: activeFocus ? Style.spacing.hairline : 0
+    border.width: activeFocus ? control.spacingTokens.hairline : 0
     border.color: Commons.Color.accent
     activeFocusOnTab: true
     Keys.onPressed: function(event) {
@@ -33,7 +38,7 @@ Rectangle {
     Column {
         anchors.left: parent.left
         anchors.right: chevron.left
-        anchors.leftMargin: Style.spacing.rowPaddingX
+        anchors.leftMargin: control.spacingTokens.rowPaddingX
         anchors.rightMargin: Style.space(12)
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(4)
@@ -45,7 +50,7 @@ Rectangle {
             text: control.label
             color: Qt.darker(control.foreground, 1.55)
             font.family: control.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: control.fontTokens.caption
             elide: Text.ElideRight
         }
         Text {
@@ -55,7 +60,7 @@ Rectangle {
             text: control.selectedIndex >= 0 ? control.options[control.selectedIndex].label : control.value
             color: control.foreground
             font.family: control.fontFamily
-            font.pixelSize: Style.font.heading
+            font.pixelSize: control.fontTokens.heading
             font.weight: Font.DemiBold
             elide: Text.ElideRight
         }
@@ -64,12 +69,12 @@ Rectangle {
         id: chevron
         textFormat: Text.PlainText
         anchors.right: parent.right
-        anchors.rightMargin: Style.spacing.rowPaddingX
+        anchors.rightMargin: control.spacingTokens.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
         text: "󰅀"
         color: Qt.darker(control.foreground, 1.55)
         font.family: control.fontFamily
-        font.pixelSize: Style.font.heading
+        font.pixelSize: control.fontTokens.heading
     }
     MouseArea {
         id: mouse
@@ -88,7 +93,7 @@ Rectangle {
         focus: true
         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
         background: Rectangle {
-            color: Commons.Color.popups.background
+            color: control.popupColors.background
             radius: Style.cornerRadius
         }
         onOpened: {
@@ -121,32 +126,33 @@ Rectangle {
                 event.accepted = true;
             }
             delegate: Rectangle {
+                id: optionRow
                 required property var modelData
                 required property int index
                 width: optionList.width
                 height: Style.space(44)
                 radius: Style.cornerRadius
-                color: Qt.tint(Commons.Color.popups.background,
+                color: Qt.tint(control.popupColors.background,
                     Util.alpha(control.foreground, index === optionList.currentIndex ? 0.10 : 0.055))
                 Text {
                     textFormat: Text.PlainText
                     anchors.fill: parent
-                    anchors.leftMargin: Style.spacing.rowPaddingX
-                    anchors.rightMargin: Style.spacing.rowPaddingX
+                    anchors.leftMargin: control.spacingTokens.rowPaddingX
+                    anchors.rightMargin: control.spacingTokens.rowPaddingX
                     horizontalAlignment: Text.AlignLeft
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
-                    text: modelData.label
+                    text: optionRow.modelData.label
                     color: control.foreground
                     font.family: control.fontFamily
-                    font.pixelSize: Style.font.body
+                    font.pixelSize: control.fontTokens.body
                 }
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onPositionChanged: optionList.currentIndex = parent.index
-                    onClicked: { optionList.currentIndex = parent.index; optionList.selectCurrent(); }
+                    onPositionChanged: optionList.currentIndex = optionRow.index
+                    onClicked: { optionList.currentIndex = optionRow.index; optionList.selectCurrent(); }
                 }
             }
         }

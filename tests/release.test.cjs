@@ -19,7 +19,7 @@ test("release keeps upstream attribution and contains no symlinks", () => {
 
 // These source guards cover security sinks, not layout or visual correctness.
 test("text sinks explicitly use PlainText and shared tooltips exclude network data", () => {
-  for (const file of ["BarWidget.qml", "CardButton.qml", "CardDropdown.qml", "CardToggle.qml"]) {
+  for (const file of ["BarWidget.qml", "AlertSettings.qml", "AlertToggleRow.qml", "CardButton.qml", "CardDropdown.qml", "CardToggle.qml"]) {
     const source = fs.readFileSync(path.join(root, file), "utf8")
     for (const block of source.split(/\bText\s*\{/).slice(1))
       assert.match(block.split("}")[0], /textFormat:\s*Text\.PlainText/, file)

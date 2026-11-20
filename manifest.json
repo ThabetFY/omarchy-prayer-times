@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "thabetfy.prayer-times",
   "name": "Prayer Times · مواقيت الصلاة",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "ThabetFY (based on Husam Emad's Prayer Times)",
   "description": "Prayer countdown and timetable with saved cities, timezone-aware times, and Arabic/English support.",
   "kinds": ["bar-widget"],

@@ -134,6 +134,54 @@ test("cache write errors are reported", t => {
   assert.ok(JSON.parse(result.stdout).error)
 })
 
+test("a shared writable cache directory cannot redirect a temporary write to a private file", t => {
+  const f = fixture(t)
+  const victim = path.join(f.home, "private-file")
+  fs.writeFileSync(victim, "must remain unchanged", { mode: 0o600 })
+  fs.chmodSync(path.dirname(f.cache), 0o777)
+  fs.writeFileSync(path.join(f.home, "bin/mktemp"), `#!/bin/bash
+target=$(/usr/bin/mktemp "$@") || exit 1
+rm -- "$target"
+ln -s -- "$HOME/private-file" "$target"
+printf '%s\\n' "$target"
+`, { mode: 0o755 })
+  const result = f.run(["4"])
+  assert.equal(fs.readFileSync(victim, "utf8"), "must remain unchanged")
+  assert.equal(result.status, 1)
+  assert.ok(JSON.parse(result.stdout).error)
+})
+
+test("atomic cache replacement does not follow an existing directory symlink", t => {
+  const f = fixture(t)
+  const victim = path.join(f.home, "private-directory")
+  fs.mkdirSync(victim)
+  fs.symlinkSync(victim, f.cache)
+  const result = f.run(["4"])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(fs.lstatSync(f.cache).isFile(), true)
+  assert.deepEqual(fs.readdirSync(victim), [])
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.cache)), JSON.parse(result.stdout))
+})
+
+test("renaming an ancestor after mktemp cannot redirect relative cache operations", t => {
+  const f = fixture(t)
+  const victim = path.join(f.home, "private-file")
+  fs.writeFileSync(victim, "must remain unchanged", { mode: 0o600 })
+  fs.writeFileSync(path.join(f.home, "bin/mktemp"), `#!/bin/bash
+target=$(/usr/bin/mktemp "$@") || exit 1
+folder="$XDG_STATE_HOME/omarchy/plugins/thabetfy.prayer-times"
+mv -- "$folder" "$folder.moved"
+mkdir -- "$folder"
+ln -s -- "$HOME/private-file" "$folder/\${target##*/}"
+printf '%s\\n' "$target"
+`, { mode: 0o755 })
+  const result = f.run(["4"])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(fs.readFileSync(victim, "utf8"), "must remain unchanged")
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(path.dirname(f.cache) + ".moved", "timetable.json"))),
+    JSON.parse(result.stdout))
+})
+
 test("saved or explicit Asr school is sent for both days; invalid choices stay offline", t => {
   for (const [saved, args, expected] of [[1, ["4"], 1], [1, ["4", JSON.stringify(city), "0"], 0]]) {
     const f = fixture(t, 4, saved)

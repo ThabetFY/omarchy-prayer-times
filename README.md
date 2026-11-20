@@ -48,17 +48,19 @@
 - اختيار حساب العصر حسب الجمهور أو المذهب الحنفي، مع عرض حالة الجلب وآخر تحديث.
 - صفحة إعدادات مستقلة، ودعم لوحة المفاتيح، وألوان تتبع سمة Omarchy.
 - لغة مستقلة للإضافة؛ يمكن إضافة لغة بملف JSON وسطر في سجل اللغات.
+- تنبيهات اختيارية قبل الأذان وعنده وللإقامة، بإعداد مشترك أو لكل صلاة، وصوت محلي اختياري.
 - لا تحديد تلقائي للموقع، ولا خدمة خلفية، ولا قياس لاستخدام الإضافة، ولا تثبيت بصلاحيات إدارية.
 
 قد تختلف المواقيت المحسوبة عن مواقيت مسجدك. تحقّق من طريقة الحساب والجدول
-لدى جهة محلية موثوقة. لا تتضمن الإضافة صوت أذان أو إشعارات.
+لدى جهة محلية موثوقة. لا تتضمن الإضافة ملف أذان؛ يمكنك اختيار ملف تنبيه من جهازك.
 
 ### المتطلبات
 
 Omarchy Quattro مع واجهة الإضافات و`Commons.Translations`، وQuickshell،
 وخط Nerd Font المعتاد في Omarchy. أوامر التشغيل المطلوبة: Bash وcurl وjq
-وأدوات GNU coreutils، ومنها `date` و`head` و`mktemp` و`mkdir` و`mv` و`rm` و`dirname`.
+وأدوات GNU coreutils، ومنها `date` و`head` و`mktemp` و`mkdir` و`mv` و`rm` و`stat` و`dirname`.
 يلزم اتصال بالإنترنت للبحث عن المدن وجلب المواقيت. يُستخدم Node.js لاختبارات التطوير فقط.
+الصوت الاختياري يستخدم `pw-play` من PipeWire الموجود في Omarchy.
 
 ### التثبيت
 
@@ -87,20 +89,22 @@ omarchy plugin add https://github.com/ThabetFY/omarchy-prayer-times.git --enable
 
 ### التحكم
 
-تستفيد اللوحة من ارتفاع أكبر مع بقائها داخل الشاشة. عند الحاجة للتمرير،
-يظهر شريط عائم أثناء التمرير أو مرور المؤشر فوقه، ثم يتلاشى دون حجز مساحة
-من عرض المحتوى. يمكن سحبه للوصول إلى بقية الإعدادات. تعرض اللوحة حالة المواقيت وآخر جلب ناجح
-بتوقيت الجهاز؛ عند فشل التحديث توضح أنه قد يكون بسبب انقطاع الاتصال أو خطأ
-آخر، دون إجراء فحوصات شبكة إضافية. يبقى الجدول الصالح متاحًا بعد فشل التحديث.
+مرّر للوصول إلى بقية الإعدادات. تعرض اللوحة حالة الجلب وآخر تحديث ناجح بتوقيت
+الجهاز. عند فشل التحديث، يبقى الجدول السابق متاحًا حتى انتهاء صلاحيته.
 
 من **حساب وقت العصر** اختر **الجمهور** (الشافعي والمالكي والحنبلي، وهو
-الافتراضي الموافق للسلوك السابق) أو **الحنفي**. يُرسل الخيار إلى Aladhan
+الافتراضي) أو **الحنفي**. يُرسل الخيار إلى Aladhan
 بقيمة `school=0` أو `school=1`. تغيير الخيار يبطل الجدول السابق؛ إذا أوقفت
 التحديث التلقائي، اضغط زر التحديث لجلب المواقيت بالطريقة الجديدة.
 
 من الإعدادات، أوقف **إظهار العدّ التنازلي في الشريط** لعرض أيقونة المسجد فقط.
 تبقى معلومات الصلاة القادمة في التلميح عند تمرير المؤشر وفي الجدول.
 الخيار مفعّل افتراضيًا، ويُحفظ باسم `showCountdown`.
+
+**الترس ← تنبيهات الصلاة**: التنبيهات والصوت معطّلان افتراضيًا. عند تفعيل
+التنبيهات في إعداد جديد، يعمل **لكل صلاة** و**عند الأذان**؛ ويبقى **قبل الأذان**
+و**الإقامة** معطّلين. الإعدادات المحفوظة لها الأولوية.
+راجع [الدقائق الافتراضية والإعدادات](docs/notifications.md).
 
 | الإجراء | النتيجة |
 | --- | --- |
@@ -134,7 +138,7 @@ omarchy plugin add https://github.com/ThabetFY/omarchy-prayer-times.git --enable
 - مهلة الاتصال ثلاث ثوانٍ، ومهلة الاستجابة الكاملة ثماني ثوانٍ لكل طلب،
   والحد الأقصى للاستجابة 64 KiB. تُستخدم HTTPS فقط دون اتباع إعادة التوجيه.
 - تُحفظ الإعدادات في مدخل الإضافة داخل `~/.config/omarchy/shell.json`:
-  `cities` و`city` و`calculationMethod` و`asrSchool` و`clock12` و`autoRefresh` و`showCountdown` و`language`.
+  `cities` و`city` و`calculationMethod` و`asrSchool` و`clock12` و`autoRefresh` و`showCountdown` و`language`، و[إعدادات التنبيهات](docs/notifications.md).
   قيمة اللغة الافتراضية `system`، ويمكن استخدام رمز مسجل في `i18n/languages.json`.
 - يُحفظ آخر جدول جُلب، بما فيه المدينة المختارة، بشكل ذري وبصلاحيات خاصة في
   `${XDG_STATE_HOME:-~/.local/state}/omarchy/plugins/thabetfy.prayer-times/timetable.json`.
@@ -157,6 +161,8 @@ omarchy plugin add https://github.com/ThabetFY/omarchy-prayer-times.git --enable
 omarchy plugin update thabetfy.prayer-times
 omarchy plugin remove thabetfy.prayer-times
 ```
+
+إذا بقيت قيم قديمة في الواجهة بعد التحديث، شغّل `omarchy restart shell`.
 
 لا تحتاج الإزالة إلى sudo، ولا تترك خدمة أو مهمة مجدولة. قد يبقى ملف التخزين
 المؤقت؛ يمكنك حذفه اختياريًا بالأمر التالي:
@@ -208,17 +214,19 @@ manual-only refresh, offline retries, and release tests.
 - Standard/Hanafi Asr calculation, fetch status, and last-successful-update time.
 - Separate settings page with keyboard-accessible cards and native shell colors.
 - Independent language selector; adding languages needs only JSON files and a registry entry.
+- Optional before-adhan, at-time and Iqama alerts, shared or per prayer, with an optional local sound.
 - No IP geolocation, privileged installer, background service, or telemetry.
 
 Calculated times may differ from your local mosque. Verify the method and
-timetable with a trusted local authority. No adhan audio or notifications are included.
+timetable with a trusted local authority. No adhan file is bundled; you may choose a local alert sound.
 
 ## Requirements
 
 Omarchy Quattro with the plugin API and `Commons.Translations`, Quickshell, and
 the standard Omarchy Nerd Font. Runtime commands: Bash, curl, jq, and GNU coreutils
-(`date`, `head`, `mktemp`, `mkdir`, `mv`, `rm`, `dirname`). Internet access is needed
+(`date`, `head`, `mktemp`, `mkdir`, `mv`, `rm`, `stat`, `dirname`). Internet access is needed
 for city search and timetable fetching. Node.js is only needed for development tests.
+Optional audio uses PipeWire's `pw-play`, supplied with Omarchy.
 
 ## Install
 
@@ -247,21 +255,23 @@ To contribute another language, see [i18n/README.md](i18n/README.md).
 
 ## Controls
 
-The taller panel still fits within the screen. When content needs scrolling,
-a draggable overlay scrollbar appears while scrolling or hovering over it,
-then fades away without reserving content width. The panel shows fetch status and the last successful update
-in device time. A failed update is labeled as potentially offline or another
-update failure; no extra connectivity probes are made. A still-valid timetable
-remains available after a failed refresh.
+Scroll to reach additional settings. The panel shows fetch status and the last
+successful update in device time. A failed refresh keeps the previous timetable
+until it expires.
 
 Under **Asr calculation**, choose **Standard** (Shafi‘i, Maliki, Hanbali; the
-default, preserving previous behavior) or **Hanafi**. This sends `school=0` or
+default) or **Hanafi**. This sends `school=0` or
 `school=1` to Aladhan. Changing it invalidates the old timetable; press Refresh
 to fetch the new calculation if automatic updates are off.
 
 In Settings, turn off **Show countdown in bar** for an icon-only widget.
 The hover tooltip and timetable still show the next prayer. This option defaults
 to on and is saved as `showCountdown`.
+
+**Gear → Prayer notifications**: alerts and sound are off by default. Enabling
+alerts in a new setup selects **Per prayer** and **At time**; **Before** and
+**Iqama** remain off. Saved settings take priority.
+See [minute presets and settings](docs/notifications.md).
 
 | Action | Result |
 | --- | --- |
@@ -296,7 +306,7 @@ for manual-only timetable requests; an already-running request may finish.
   response, a 64 KiB response limit, HTTPS-only transport, and no redirect following.
 - Settings live on this widget's entry in `~/.config/omarchy/shell.json`:
   `cities`, `city`, `calculationMethod`, `asrSchool`, `clock12`, `autoRefresh`, `showCountdown`, and `language`
-  (`system` by default, or a code registered in `i18n/languages.json`).
+  (`system` by default, or a code registered in `i18n/languages.json`), plus [notification settings](docs/notifications.md).
 - The last fetched timetable is written atomically with private permissions to
   `${XDG_STATE_HOME:-~/.local/state}/omarchy/plugins/thabetfy.prayer-times/timetable.json`.
   It includes the selected city. Only a matching, unexpired cache is displayed.
@@ -318,6 +328,8 @@ Do not publish symlinked dotfiles as a plugin: release files must be regular fil
 omarchy plugin update thabetfy.prayer-times
 omarchy plugin remove thabetfy.prayer-times
 ```
+
+If old values remain visible after updating, run `omarchy restart shell`.
 
 Removal needs no sudo and leaves no service or scheduled job. The cache may remain;
 optionally remove its file with:

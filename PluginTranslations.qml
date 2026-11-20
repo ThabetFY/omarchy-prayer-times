@@ -15,7 +15,7 @@ QtObject {
     readonly property string baseLanguage: language.split("-")[0]
     readonly property bool rightToLeft: {
         if (followsSystem) return Commons.I18n.rightToLeft;
-        for (var i = 0; i < languages.length; i++)
+        for (let i = 0; i < languages.length; i++)
             if (languages[i].code === language) return languages[i].rtl;
         return false;
     }

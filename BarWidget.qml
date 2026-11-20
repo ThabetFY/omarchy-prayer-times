@@ -1,13 +1,16 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
-import qs.Ui
+import qs.Ui as Ui
 import "Model.js" as Model
+import "AlertDelivery.js" as AlertDelivery
 
-BarWidget {
+Ui.BarWidget {
     id: root
     moduleName: "thabetfy.prayer-times"
     LayoutMirroring.enabled: strings.rightToLeft
@@ -17,6 +20,7 @@ BarWidget {
         id: strings
         requestedLanguage: String(root.setting("language", "system"))
     }
+    readonly property PluginTranslations translations: strings
     function t(key) { return strings.t(key); }
     function countdownLabel(next, current) {
         if (!next) return "";
@@ -45,9 +49,10 @@ BarWidget {
     property bool refreshFailed: false
     readonly property bool autoRefresh: setting("autoRefresh", true) !== false
     property bool settingsOpen: false
+    property bool alertSettingsOpen: false
     readonly property bool settingsVisible: settingsOpen || !city
     property bool editingCity: false
-    readonly property bool selectingCity: settingsVisible && (editingCity || !city)
+    readonly property bool selectingCity: settingsVisible && !alertSettingsOpen && (editingCity || !city)
     property var cityResults: []
     property string citySearchError: ""
     property string error: ""
@@ -61,15 +66,78 @@ BarWidget {
     readonly property bool showCountdown: setting("showCountdown", true) !== false
     readonly property var nextPrayer: Model.nextPrayer(schedule, now)
     readonly property string tooltipLabel: nextPrayer ? countdownLabel(nextPrayer, now) : t("title")
-    readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
+    readonly property color foreground: root.hostBar ? root.hostBar.foreground : Commons.Color.foreground
     readonly property color dim: Qt.darker(foreground, 1.55)
-    readonly property string contentFont: bar ? bar.fontFamily : Style.font.family
+    // Omarchy exports these host interfaces as anonymous QObjects.
+    readonly property var fontTokens: Style.font
+    readonly property var spacingTokens: Style.spacing
+    readonly property var barTokens: Style.bar
+    readonly property var popupColors: Commons.Color.popups
+    readonly property var hostBar: bar
+    readonly property string contentFont: root.hostBar ? root.hostBar.fontFamily : root.fontTokens.family
+    readonly property var notificationConfig: Model.notificationConfig(settings)
+    readonly property bool notificationsActive: Model.notificationsActive(notificationConfig)
+    readonly property string alertContext: JSON.stringify([selectedCityKey, calculationMethod, asrSchool, notificationConfig])
+    property double lastAlertCheck: Date.now()
+    property var carryoverSchedule: null
+    readonly property bool notificationSoundEnabled: setting("notificationSoundEnabled", false) === true
+    readonly property string soundFile: Model.localSoundPath(setting("notificationSoundFile", ""), Quickshell.env("HOME"))
+    property bool soundStopped: false
+    property string soundError: ""
+
+    function checkAlerts(at) {
+        var previous = lastAlertCheck;
+        lastAlertCheck = at;
+        var alerts = Model.usableSchedule(schedule, city, calculationMethod, at, asrSchool)
+            ? Model.prayerAlerts(schedule, notificationConfig, previous, at) : [];
+        if (carryoverSchedule) {
+            if (Model.pendingIqamaSchedule(carryoverSchedule, at) &&
+                Model.cityKey(carryoverSchedule.city) === selectedCityKey &&
+                carryoverSchedule.method === calculationMethod &&
+                Model.normalizedSchool(carryoverSchedule.school) === asrSchool)
+                alerts = alerts.concat(Model.prayerAlerts(carryoverSchedule, notificationConfig, previous, at, true));
+            else carryoverSchedule = null;
+        }
+        for (let i = 0; i < alerts.length; i++) {
+            const alert = alerts[i];
+            if (!AlertDelivery.claim(alert, at)) continue;
+            const title = t("notifications." + alert.phase + "Title").arg(t(alert.key));
+            const body = alert.phase === "iqama"
+                ? t("notifications.iqamaBody").arg(city.name).arg(strings.formatNumber(alert.minutes))
+                : t("notifications.body").arg(city.name).arg(strings.formatTime(alert.time, clock12));
+            Quickshell.execDetached(Model.notificationCommand(title, body));
+            if (notificationSoundEnabled && soundFile !== "" && !dndProbe.running && !soundPlayer.running) {
+                dndProbe.candidate = soundFile;
+                dndProbe.answer = "";
+                dndProbe.running = true;
+            }
+        }
+    }
+    function playSound() {
+        if (soundFile === "" || soundPlayer.running) return;
+        soundError = "";
+        soundStopped = false;
+        soundPlayer.command = Model.soundCommand(soundFile);
+        soundPlayer.running = true;
+    }
+    function stopSound() {
+        dndProbe.candidate = "";
+        dndProbe.running = false;
+        soundStopped = true;
+        soundPlayer.running = false;
+    }
+    onAlertContextChanged: lastAlertCheck = Date.now()
+    onNotificationsActiveChanged: {
+        if (!notificationsActive) { stopSound(); carryoverSchedule = null; }
+    }
+    onNotificationSoundEnabledChanged: { if (!notificationSoundEnabled) stopSound(); }
+    onSoundFileChanged: { stopSound(); soundError = ""; }
 
     component PanelText: Text {
         textFormat: Text.PlainText
         color: root.foreground
         font.family: root.contentFont
-        font.pixelSize: Style.font.bodySmall
+        font.pixelSize: root.fontTokens.bodySmall
         horizontalAlignment: Text.AlignLeft
     }
 
@@ -110,11 +178,12 @@ BarWidget {
         if (!persistSettings({ cities: saved, city: selected })) return;
         editingCity = false;
         settingsOpen = false;
+        alertSettingsOpen = false;
         cityResults = [];
         cityField.text = "";
     }
     function activateCity(key) {
-        for (var i = 0; i < cities.length; i++) {
+        for (let i = 0; i < cities.length; i++) {
             if (Model.cityKey(cities[i]) === key) {
                 persistSettings({ city: cities[i] });
                 return;
@@ -128,6 +197,11 @@ BarWidget {
     }
     function toggleSettings() {
         closeDropdowns();
+        if (alertSettingsOpen) {
+            alertSettingsOpen = false;
+            Qt.callLater(function() { panelScroll.contentY = 0; });
+            return;
+        }
         settingsOpen = !settingsVisible;
         editingCity = false;
         if (!city) Qt.callLater(function() { cityField.forceActiveFocus(); });
@@ -135,9 +209,17 @@ BarWidget {
     function open() {
         now = new Date();
         settingsOpen = false;
+        alertSettingsOpen = false;
         editingCity = false;
         popupOpen = true;
         if (selectingCity) Qt.callLater(function() { cityField.forceActiveFocus(); });
+    }
+    function openNotifications() {
+        closeDropdowns();
+        popupOpen = true;
+        settingsOpen = true;
+        alertSettingsOpen = true;
+        Qt.callLater(function() { panelScroll.contentY = 0; });
     }
     function close() {
         closeDropdowns();
@@ -148,16 +230,17 @@ BarWidget {
         methodSelector.close();
         schoolSelector.close();
         citySelector.close();
+        alertSettings.closeDropdowns();
     }
     function persistSettings(values) {
         var entry = {
             id: moduleName
         };
-        for (var key in settings)
+        for (let key in settings)
             entry[key] = settings[key];
-        for (var name in values)
+        for (let name in values)
             entry[name] = values[name];
-        if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function" || !bar.shell.updateEntryInline(moduleName, entry)) {
+        if (!root.hostBar || !root.hostBar.shell || typeof root.hostBar.shell.updateEntryInline !== "function" || !root.hostBar.shell.updateEntryInline(root.moduleName, entry)) {
             error = "تعذر حفظ الإعدادات";
             return false;
         }
@@ -176,13 +259,15 @@ BarWidget {
         }
         if (!Model.usableSchedule(data, city, calculationMethod, Date.now(), asrSchool)) return;
         var cache = {};
-        for (var i = 0; i < cities.length; i++) {
-            var key = Model.cityKey(cities[i]);
+        for (let i = 0; i < cities.length; i++) {
+            const key = Model.cityKey(cities[i]);
             if (Model.usableSchedule(scheduleCache[key], cities[i], calculationMethod, Date.now(), asrSchool))
                 cache[key] = scheduleCache[key];
         }
         cache[selectedCityKey] = data;
         scheduleCache = cache;
+        if (notificationsActive && schedule && schedule.expiresAt !== data.expiresAt &&
+            Model.pendingIqamaSchedule(schedule, Date.now())) carryoverSchedule = schedule;
         schedule = data;
         lastUpdatedAt = data.updatedAt;
         refreshFailed = false;
@@ -191,6 +276,7 @@ BarWidget {
 
     function resetSchedule() {
         schedule = null;
+        carryoverSchedule = null;
         lastUpdatedAt = 0;
         refreshFailed = false;
         error = "";
@@ -247,23 +333,70 @@ BarWidget {
     }
 
     Timer {
-        interval: 30000
+        interval: root.notificationsActive ? 1000 : 30000
         running: true
         repeat: true
         onTriggered: {
             root.now = new Date();
             if (root.schedule && root.now.getTime() >= root.schedule.expiresAt) {
+                if (root.notificationsActive && Model.pendingIqamaSchedule(root.schedule, root.now.getTime()))
+                    root.carryoverSchedule = root.schedule;
                 root.schedule = null;
             }
+            root.checkAlerts(root.now.getTime());
             if (Model.shouldRefresh(root.city, root.schedule, root.autoRefresh, fetchProcess.running, root.lastAttempt, root.now.getTime()))
                 root.refresh();
         }
+    }
+    Commons.ShellIpc {
+        target: root.moduleName
+        function open(): void { root.open(); }
+        function close(): void { root.close(); }
+        function openNotifications(): void { root.openNotifications(); }
+        function previewSound(): void { root.playSound(); }
+        function stopSound(): void { root.stopSound(); }
+        function status(): string {
+            return JSON.stringify({
+                opened: root.opened,
+                page: root.alertSettingsOpen ? "notifications" : root.settingsVisible ? "settings" : "timetable",
+                notificationScope: root.notificationConfig.scope,
+                notificationsActive: root.notificationsActive,
+                soundRunning: soundPlayer.running,
+                soundError: root.soundError
+            });
+        }
+    }
+
+    Process {
+        id: dndProbe
+        property string candidate: ""
+        property string answer: ""
+        command: ["omarchy-shell", "notifications", "isDnd"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: dndProbe.answer = text.trim()
+        }
+        onExited: function(exitCode) {
+            if (exitCode === 0 && answer === "off" && candidate === root.soundFile &&
+                root.notificationSoundEnabled && root.notificationsActive) root.playSound();
+        }
+    }
+    Process {
+        id: soundPlayer
+        onExited: function(exitCode) {
+            if (exitCode !== 0 && !root.soundStopped) root.soundError = "notifications.soundFailed";
+        }
+    }
+    Timer {
+        interval: 30000
+        running: soundPlayer.running
+        onTriggered: root.stopSound()
     }
 
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
 
-    WidgetButton {
+    Ui.WidgetButton {
         id: button
         anchors.fill: parent
         bar: root.bar
@@ -286,12 +419,12 @@ BarWidget {
             anchors.centerIn: parent
             spacing: countdown.visible ? Style.space(6) : 0
 
-            OpticalGlyph {
-                width: Style.bar.iconCanvas
+            Ui.OpticalGlyph {
+                width: root.barTokens.iconCanvas
                 height: button.height
                 text: ""
                 fontFamily: button.fontFamily
-                fontSize: Style.bar.iconFont
+                fontSize: root.barTokens.iconFont
                 color: button.foreground
             }
             Text {
@@ -309,14 +442,14 @@ BarWidget {
         }
     }
 
-    KeyboardPanel {
+    Ui.KeyboardPanel {
         id: popup
         anchorItem: button
         owner: root
         bar: root.bar
         open: root.popupOpen
         contentWidth: popup.fittedContentWidth(Style.space(340))
-        contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(780))
+        contentHeight: popup.fittedContentHeight(panelContent.implicitHeight, Style.space(780))
 
         Flickable {
             id: panelScroll
@@ -324,7 +457,7 @@ BarWidget {
             LayoutMirroring.childrenInherit: true
             anchors.fill: parent
             contentWidth: width
-            contentHeight: content.implicitHeight
+            contentHeight: panelContent.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.VerticalFlick
@@ -353,9 +486,9 @@ BarWidget {
             }
 
           Column {
-            id: content
+            id: panelContent
             width: panelScroll.contentWidth
-            spacing: Style.spacing.panelGap
+            spacing: root.spacingTokens.panelGap
 
             Item {
                 width: parent.width
@@ -370,10 +503,10 @@ BarWidget {
                 PanelText {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
-                    text: root.settingsVisible ? root.t("settings") : root.city ? root.city.name : root.t("title")
+                    text: root.alertSettingsOpen ? root.t("notifications.title") : root.settingsVisible ? root.t("settings") : root.city ? root.city.name : root.t("title")
                     elide: Text.ElideRight
                     color: root.dim
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: root.fontTokens.caption
                 }
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -382,25 +515,25 @@ BarWidget {
                     PanelText {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.t("title")
-                        font.pixelSize: Style.font.heading
+                        font.pixelSize: root.fontTokens.heading
                         font.weight: Font.DemiBold
                     }
-                    OpticalGlyph {
-                        width: Math.round(Style.font.display * 1.3)
+                    Ui.OpticalGlyph {
+                        width: Math.round(root.fontTokens.display * 1.3)
                         height: width
                         text: ""
                         fontFamily: root.contentFont
-                        fontSize: Style.font.display
+                        fontSize: root.fontTokens.display
                         color: root.foreground
                     }
                 }
               }
-              PanelActionButton {
+              Ui.PanelActionButton {
                 id: settingsButton
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 iconText: root.settingsVisible ? (strings.rightToLeft ? "󰅂" : "󰅁") : "󰒓"
-                tooltipText: root.settingsVisible ? root.t("back") : root.t("settings")
+                tooltipText: root.alertSettingsOpen ? root.t("notifications.backSettings") : root.settingsVisible ? root.t("back") : root.t("settings")
                 enabled: !!root.city
                 focusable: true
                 foreground: root.foreground
@@ -423,8 +556,8 @@ BarWidget {
 
             Column {
                 width: parent.width
-                visible: root.settingsVisible && root.cities.length > 0
-                spacing: Style.spacing.md
+                visible: root.settingsVisible && !root.alertSettingsOpen && root.cities.length > 0
+                spacing: root.spacingTokens.md
 
                 PanelText {
                     width: parent.width
@@ -441,12 +574,12 @@ BarWidget {
                         width: parent.width
                         height: Style.space(72)
                         radius: Style.cornerRadius
-                        color: Qt.tint(Commons.Color.popups.background, Util.alpha(root.foreground, selected ? 0.10 : 0.055))
+                        color: Qt.tint(root.popupColors.background, Util.alpha(root.foreground, selected ? 0.10 : 0.055))
 
                         Item {
                             anchors.left: parent.left
                             anchors.right: removeCityButton.left
-                            anchors.leftMargin: Style.spacing.rowPaddingX
+                            anchors.leftMargin: root.spacingTokens.rowPaddingX
                             anchors.rightMargin: Style.space(6)
                             height: parent.height
                             activeFocusOnTab: true
@@ -463,7 +596,7 @@ BarWidget {
                                     elide: Text.ElideRight
                                     text: savedCityCard.modelData.name
                                     color: savedCityCard.selected ? Commons.Color.accent : root.foreground
-                                    font.pixelSize: Style.font.heading
+                                    font.pixelSize: root.fontTokens.heading
                                     font.weight: Font.DemiBold
                                 }
                                 PanelText {
@@ -471,11 +604,11 @@ BarWidget {
                                     elide: Text.ElideRight
                                     text: Model.cityDetails(savedCityCard.modelData)
                                     color: root.dim
-                                    font.pixelSize: Style.font.caption
+                                    font.pixelSize: root.fontTokens.caption
                                 }
                             }
                         }
-                        PanelActionButton {
+                        Ui.PanelActionButton {
                             id: removeCityButton
                             anchors.right: parent.right
                             anchors.rightMargin: Style.space(8)
@@ -483,7 +616,7 @@ BarWidget {
                             iconText: "󰆴"
                             tooltipText: root.t("cities.remove")
                             foreground: root.dim
-                            hoverColor: root.bar ? root.bar.urgent : Commons.Color.accent
+                            hoverColor: root.hostBar ? root.hostBar.urgent : Commons.Color.accent
                             fontFamily: root.contentFont
                             focusable: true
                             onClicked: root.removeCity(savedCityCard.cityKey)
@@ -507,21 +640,21 @@ BarWidget {
             Column {
                 width: parent.width
                 visible: root.selectingCity
-                spacing: Style.spacing.md
+                spacing: root.spacingTokens.md
 
-                TextField {
+                Ui.TextField {
                     id: cityField
                     width: parent.width
                     placeholderText: root.t("search.placeholder")
                     maximumLength: 120
                     enabled: !citySearchProcess.running
                     font.family: root.contentFont
-                    font.pixelSize: Style.font.heading
+                    font.pixelSize: root.fontTokens.heading
                     implicitHeight: Style.space(54)
                     background: Rectangle {
                         radius: Style.cornerRadius
-                        color: Qt.tint(Commons.Color.popups.background, Util.alpha(root.foreground, 0.055))
-                        border.width: cityField.activeFocus ? Style.spacing.hairline : 0
+                        color: Qt.tint(root.popupColors.background, Util.alpha(root.foreground, 0.055))
+                        border.width: cityField.activeFocus ? root.spacingTokens.hairline : 0
                         border.color: Commons.Color.accent
                     }
                     onAccepted: root.searchCities()
@@ -539,17 +672,18 @@ BarWidget {
                     wrapMode: Text.Wrap
                     text: root.citySearchError ? root.t(root.citySearchError) : root.t("search.privacy")
                     color: root.dim
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: root.fontTokens.caption
                 }
                 Repeater {
                     model: root.cityResults
                     delegate: Rectangle {
+                        id: cityResultCard
                         required property var modelData
                         width: parent.width
                         height: cityResult.implicitHeight + Style.space(20)
                         radius: Style.cornerRadius
                         activeFocusOnTab: true
-                        color: Qt.tint(Commons.Color.popups.background,
+                        color: Qt.tint(root.popupColors.background,
                             Util.alpha(root.foreground, activeFocus || resultHover.hovered ? 0.085 : 0.055))
                         Keys.onReturnPressed: root.selectCity(modelData)
                         Keys.onSpacePressed: root.selectCity(modelData)
@@ -560,22 +694,22 @@ BarWidget {
                             anchors.margins: Style.space(10)
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
-                            text: Model.cityLabel(modelData)
-                            font.pixelSize: Style.font.body
+                            text: Model.cityLabel(cityResultCard.modelData)
+                            font.pixelSize: root.fontTokens.body
                         }
-                        TapHandler { onTapped: root.selectCity(modelData) }
+                        TapHandler { onTapped: root.selectCity(cityResultCard.modelData) }
                     }
                 }
             }
             Column {
                 width: parent.width
-                visible: !!root.city
+                visible: !!root.city && !root.alertSettingsOpen
                 spacing: Style.space(3)
                 PanelText {
                     width: parent.width
                     wrapMode: Text.Wrap
                     text: root.t(root.statusKey)
-                    color: root.refreshFailed ? (root.bar ? root.bar.urgent : Commons.Color.accent) : root.dim
+                    color: root.refreshFailed ? (root.hostBar ? root.hostBar.urgent : Commons.Color.accent) : root.dim
                 }
                 PanelText {
                     width: parent.width
@@ -585,7 +719,7 @@ BarWidget {
                         ? root.t("status.updated").arg(strings.formatDateTime(root.lastUpdatedAt))
                         : root.t("status.updatedUnknown")
                     color: root.dim
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: root.fontTokens.caption
                 }
             }
             PanelText {
@@ -593,12 +727,12 @@ BarWidget {
                 wrapMode: Text.Wrap
                 visible: root.error !== ""
                 text: root.t(root.error)
-                color: root.bar ? root.bar.urgent : Commons.Color.accent
+                color: root.hostBar ? root.hostBar.urgent : Commons.Color.accent
             }
             Column {
               width: parent.width
               visible: !root.settingsVisible
-              spacing: Style.spacing.md
+              spacing: root.spacingTokens.md
 
               Repeater {
                 model: root.timings ? Model.PRAYER_ORDER : []
@@ -613,7 +747,7 @@ BarWidget {
                     width: parent.width
                     height: Style.space(72)
                     radius: Style.cornerRadius
-                    color: Qt.tint(Commons.Color.popups.background,
+                    color: Qt.tint(root.popupColors.background,
                         Util.alpha(root.foreground, isNext ? 0.10 : cardHover.hovered ? 0.085 : 0.055))
 
                     HoverHandler { id: cardHover }
@@ -622,7 +756,7 @@ BarWidget {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
-                        anchors.margins: Style.spacing.rowPaddingX
+                        anchors.margins: root.spacingTokens.rowPaddingX
                         height: prayerTime.implicitHeight
 
                       PanelText {
@@ -634,14 +768,14 @@ BarWidget {
                         elide: Text.ElideRight
                         text: root.t(prayerCard.modelData)
                         color: prayerCard.isNext ? Commons.Color.accent : root.foreground
-                        font.pixelSize: Style.font.heading
+                        font.pixelSize: root.fontTokens.heading
                         font.weight: Font.DemiBold
                       }
                       PanelText {
                         id: prayerTime
                         anchors.right: parent.right
                         text: strings.formatTime(prayerCard.wallTime, root.clock12)
-                        font.pixelSize: Style.font.heading
+                        font.pixelSize: root.fontTokens.heading
                         font.weight: Font.DemiBold
                       }
                     }
@@ -649,15 +783,15 @@ BarWidget {
                     PanelText {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        anchors.leftMargin: Style.spacing.rowPaddingX
-                        anchors.rightMargin: Style.spacing.rowPaddingX
+                        anchors.leftMargin: root.spacingTokens.rowPaddingX
+                        anchors.rightMargin: root.spacingTokens.rowPaddingX
                         y: Style.space(35)
                         text: prayerCard.isNext
                             ? (prayerCard.tomorrow ? root.t("countdown.tomorrow").arg(root.countdownLabel(root.nextPrayer, root.now)) : root.countdownLabel(root.nextPrayer, root.now))
                             : root.t(prayerCard.modelData === "Sunrise" ? "sunrise.description" : "today")
                         elide: Text.ElideRight
                         color: prayerCard.isNext ? root.dim : Qt.darker(root.foreground, 2.1)
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: root.fontTokens.caption
                     }
 
                     Rectangle {
@@ -665,8 +799,8 @@ BarWidget {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        anchors.leftMargin: Style.spacing.rowPaddingX
-                        anchors.rightMargin: Style.spacing.rowPaddingX
+                        anchors.leftMargin: root.spacingTokens.rowPaddingX
+                        anchors.rightMargin: root.spacingTokens.rowPaddingX
                         anchors.bottomMargin: Style.space(12)
                         height: Math.max(2, Style.space(3))
                         radius: height / 2
@@ -696,8 +830,8 @@ BarWidget {
 
             Column {
               width: parent.width
-              visible: root.settingsVisible
-              spacing: Style.spacing.md
+              visible: root.settingsVisible && !root.alertSettingsOpen
+              spacing: root.spacingTokens.md
 
                CardDropdown {
                 id: languageSelector
@@ -724,6 +858,15 @@ BarWidget {
                 checked: root.autoRefresh
                 fontFamily: root.contentFont
                 onClicked: root.persistSettings({ autoRefresh: !root.autoRefresh })
+              }
+               CardButton {
+                width: parent.width
+                text: root.t("notifications.title")
+                fontFamily: root.contentFont
+                focusable: true
+                onClicked: {
+                    root.openNotifications();
+                }
               }
                CardDropdown {
                 id: schoolSelector
@@ -763,6 +906,20 @@ BarWidget {
                 fontFamily: root.contentFont
                 onClicked: root.refresh(true)
               }
+            }
+            AlertSettings {
+                id: alertSettings
+                width: parent.width
+                visible: root.alertSettingsOpen
+                settings: root.settings
+                strings: root.translations
+                fontFamily: root.contentFont
+                soundPath: root.soundFile
+                soundRunning: soundPlayer.running
+                soundError: root.soundError
+                onChanged: function(values) { root.persistSettings(values); }
+                onPreviewRequested: root.playSound()
+                onStopRequested: root.stopSound()
             }
           }
         }

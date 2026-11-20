@@ -5,7 +5,7 @@ umask 077
 # Messages are fixed plugin strings, never user or API input.
 fail() { printf '{"error":"%s"}\n' "$1"; exit 1; }
 
-for dependency in curl jq date head mktemp; do
+for dependency in curl jq date head mktemp stat; do
   command -v "$dependency" >/dev/null 2>&1 || fail "Missing dependency: $dependency"
 done
 plugin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -49,7 +49,6 @@ if [[ ${1:-} == --search ]]; then
 fi
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/plugins/$plugin_id"
-cache_file="$state_dir/timetable.json"
 method="${1:-}"
 if [[ -z $method && -f $config_file ]]; then
   method=$(jq -r --arg id "$plugin_id" '[.bar.layout | .[][] | select(.id == $id) | .calculationMethod // empty][0] // empty' "$config_file" 2>/dev/null)
@@ -114,11 +113,19 @@ parsed=$(jq -cen --argjson city "$city" --argjson method "$method" --argjson sch
     expiresAt: ($expires * 1000), nextFajr: ($next * 1000), nextFajrTime: $fajr} |
     select([.timestamps | .Fajr, .Sunrise, .Dhuhr, .Asr, .Maghrib, .Isha] as $times |
       all(range(1;6); $times[.] > $times[. - 1]))') || fail 'تعذر جلب المواقيت'
-mkdir -p "$state_dir" || fail 'تعذر حفظ المواقيت'
+mkdir -p -- "$state_dir" || fail 'تعذر حفظ المواقيت'
+# Anchor relative operations to the actual directory, even if an ancestor is
+# renamed. Refuse shared writable directories instead of reopening a temporary
+# filename that another local account could replace with a symlink.
+cd -- "$state_dir" || fail 'تعذر حفظ المواقيت'
+[[ -O . ]] || fail 'تعذر حفظ المواقيت'
+state_mode=$(stat -c %a .) || fail 'تعذر حفظ المواقيت'
+(( (8#$state_mode & 0022) == 0 )) || fail 'تعذر حفظ المواقيت'
+cache_file="timetable.json"
 # Each monitor can fetch concurrently; do not share one temporary cache file.
 cache_tmp=$(mktemp "$cache_file.XXXXXX") || fail 'تعذر حفظ المواقيت'
 trap 'rm -f -- "$cache_tmp"' EXIT
-if ! { printf '%s\n' "$parsed" >"$cache_tmp" && mv "$cache_tmp" "$cache_file"; }; then
+if ! { printf '%s\n' "$parsed" >"$cache_tmp" && mv -T -- "$cache_tmp" "$cache_file"; }; then
   fail 'تعذر حفظ المواقيت'
 fi
 printf '%s\n' "$parsed"

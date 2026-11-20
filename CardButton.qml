@@ -7,16 +7,19 @@ Rectangle {
     id: control
     property string text: ""
     property string iconText: ""
-    property string fontFamily: Style.font.family
+    property string fontFamily: control.fontTokens.family
     property color foreground: Commons.Color.foreground
     property bool focusable: true
+    readonly property var fontTokens: Style.font
+    readonly property var spacingTokens: Style.spacing
+    readonly property var popupColors: Commons.Color.popups
     signal clicked()
 
     implicitHeight: Style.space(54)
     radius: Style.cornerRadius
-    color: Qt.tint(Commons.Color.popups.background,
+    color: Qt.tint(control.popupColors.background,
         Util.alpha(foreground, activeFocus || mouse.containsMouse ? 0.085 : 0.055))
-    border.width: activeFocus ? Style.spacing.hairline : 0
+    border.width: activeFocus ? control.spacingTokens.hairline : 0
     border.color: Commons.Color.accent
     opacity: enabled ? 1 : 0.45
     activeFocusOnTab: focusable
@@ -28,7 +31,7 @@ Rectangle {
         textFormat: Text.PlainText
         anchors.left: parent.left
         anchors.right: icon.left
-        anchors.leftMargin: Style.spacing.rowPaddingX
+        anchors.leftMargin: control.spacingTokens.rowPaddingX
         anchors.rightMargin: Style.space(12)
         anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignLeft
@@ -36,19 +39,19 @@ Rectangle {
         elide: Text.ElideRight
         color: control.foreground
         font.family: control.fontFamily
-        font.pixelSize: Style.font.heading
+        font.pixelSize: control.fontTokens.heading
         font.weight: Font.DemiBold
     }
     Text {
         id: icon
         textFormat: Text.PlainText
         anchors.right: parent.right
-        anchors.rightMargin: Style.spacing.rowPaddingX
+        anchors.rightMargin: control.spacingTokens.rowPaddingX
         anchors.verticalCenter: parent.verticalCenter
         text: control.iconText
         color: control.foreground
         font.family: control.fontFamily
-        font.pixelSize: Style.font.heading
+        font.pixelSize: control.fontTokens.heading
     }
     MouseArea {
         id: mouse

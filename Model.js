@@ -4,6 +4,14 @@ var PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]
 var CALCULATION_METHODS = [3, 4, 1, 2, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 7, 0]
 var MAX_CITIES = 8
 var TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+var ALERT_PHASES = ["before", "at", "iqama"]
+var PRAYER_ALERT_MINUTES = {
+  Fajr: { before: 15, iqama: 20 },
+  Dhuhr: { before: 10, iqama: 10 },
+  Asr: { before: 10, iqama: 10 },
+  Maghrib: { before: 5, iqama: 5 },
+  Isha: { before: 10, iqama: 15 }
+}
 
 function normalizedMethod(value) {
   var method = Number(value)
@@ -145,4 +153,175 @@ function nextPrayer(schedule, now) {
   }
   return schedule.nextFajr > now.getTime()
     ? { key: "Fajr", time: schedule.nextFajrTime, date: new Date(schedule.nextFajr), tomorrow: true } : null
+}
+
+function notificationMinutes(value, fallback) {
+  var minutes = Number(value)
+  return String(value) === String(minutes) && isFinite(minutes) &&
+    Math.floor(minutes) === minutes && minutes >= 1 && minutes <= 60 ? minutes : fallback
+}
+
+function notificationConfig(settings) {
+  settings = settings || {}
+  var defaults = {
+    before: { enabled: false, minutes: 10 },
+    at: { enabled: true, minutes: 0 },
+    iqama: { enabled: false, minutes: 15 }
+  }
+  var shared = notificationOverrides(settings.notificationAlerts)
+  var alerts = mergeNotificationAlerts(defaults, shared)
+  var raw = settings.prayerNotifications
+  var prayers = {}
+  for (var i = 0; i < PRAYERS.length; i++) {
+    var key = PRAYERS[i]
+    var entry = raw && typeof raw === "object" && !Array.isArray(raw) ? raw[key] : null
+    prayers[key] = notificationOverrides(entry)
+  }
+  return {
+    scope: settings.notificationEnabled === true &&
+      (settings.notificationScope === "all" || settings.notificationScope === "each") ? settings.notificationScope : "off",
+    alerts: alerts,
+    shared: shared,
+    prayers: prayers
+  }
+}
+
+function notificationOverrides(value) {
+  var result = {}
+  if (!value || typeof value !== "object" || Array.isArray(value)) return result
+  for (var i = 0; i < ALERT_PHASES.length; i++) {
+    var phase = ALERT_PHASES[i]
+    var entry = value[phase]
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    var rule = {}
+    if (typeof entry.enabled === "boolean") rule.enabled = entry.enabled
+    var minutes = notificationMinutes(entry.minutes, null)
+    if (phase !== "at" && minutes !== null) rule.minutes = minutes
+    if (Object.keys(rule).length) result[phase] = rule
+  }
+  return result
+}
+
+function mergeNotificationAlerts(defaults, overrides) {
+  var result = {}
+  for (var i = 0; i < ALERT_PHASES.length; i++) {
+    var phase = ALERT_PHASES[i]
+    result[phase] = Object.assign({}, defaults[phase], overrides[phase] || {})
+  }
+  return result
+}
+
+function prayerNotificationDefaults(config, key) {
+  var minutes = PRAYER_ALERT_MINUTES[key]
+  if (!minutes) return config.alerts
+  var defaults = mergeNotificationAlerts(config.alerts, {
+    before: { minutes: minutes.before }, iqama: { minutes: minutes.iqama }
+  })
+  return mergeNotificationAlerts(defaults, config.shared)
+}
+
+function notificationRule(config, key) {
+  var defaults = config.scope === "each" ? prayerNotificationDefaults(config, key) : config.alerts
+  var rules = mergeNotificationAlerts(defaults, config.scope === "each" ? config.prayers[key] || {} : {})
+  if (config.scope === "off")
+    for (var i = 0; i < ALERT_PHASES.length; i++) rules[ALERT_PHASES[i]].enabled = false
+  return rules
+}
+
+function notificationsActive(config) {
+  return PRAYERS.some(function(key) {
+    var rules = notificationRule(config, key)
+    return ALERT_PHASES.some(function(phase) { return rules[phase].enabled })
+  })
+}
+
+// Return a settings patch without mutating other prayers or the active config.
+function notificationChange(config, prayer, phase, values) {
+  if (ALERT_PHASES.indexOf(phase) < 0 || (prayer && PRAYERS.indexOf(prayer) < 0)) return {}
+  var target = JSON.parse(JSON.stringify(prayer ? config.prayers : config.shared))
+  var rules = prayer ? target[prayer] : target
+  var rule = Object.assign({}, rules[phase] || {})
+  if (typeof values.enabled === "boolean") rule.enabled = values.enabled
+  var minutes = notificationMinutes(values.minutes, null)
+  if (phase !== "at" && minutes !== null) rule.minutes = minutes
+  rules[phase] = rule
+  return prayer ? { prayerNotifications: target } : { notificationAlerts: target }
+}
+
+function resetPrayerNotifications(config, prayer) {
+  var prayers = JSON.parse(JSON.stringify(config.prayers))
+  if (PRAYERS.indexOf(prayer) >= 0) prayers[prayer] = {}
+  return { prayerNotifications: prayers }
+}
+
+function alertDeadline(prayerAt, phase, minutes) {
+  return prayerAt + (phase === "before" ? -minutes * 60000 : phase === "iqama" ? minutes * 60000 : 0)
+}
+
+// An already active widget can keep yesterday's final Iqama reminder across
+// midnight. This never makes an expired timetable current in the UI.
+function pendingIqamaSchedule(schedule, nowMs) {
+  return schedule && isFinite(nowMs) && schedule.expiresAt <= nowMs &&
+    nowMs <= schedule.expiresAt + 3660000
+}
+
+// Cross deadlines rather than checking nextPrayer: at the exact prayer time,
+// nextPrayer has already advanced. Skip old alarms after sleep or clock jumps.
+function prayerAlerts(schedule, config, previousMs, nowMs, carryover) {
+  if (!schedule || !isFinite(previousMs) || !isFinite(nowMs) ||
+      nowMs <= previousMs || config.scope === "off") return []
+  var expired = schedule.expiresAt <= nowMs
+  if (expired && !(carryover === true && pendingIqamaSchedule(schedule, nowMs))) return []
+  var result = []
+  var prayers = PRAYERS.map(function(key) {
+    return { key: key, prayerAt: schedule.timestamps[key], time: schedule.timings[key] }
+  })
+  if (!expired) prayers.push({ key: "Fajr", prayerAt: schedule.nextFajr, time: schedule.nextFajrTime })
+  for (var i = 0; i < prayers.length; i++) {
+    var prayer = prayers[i]
+    var rules = notificationRule(config, prayer.key)
+    for (var p = 0; p < ALERT_PHASES.length; p++) {
+      var phase = ALERT_PHASES[p]
+      var rule = rules[phase]
+      if (!rule.enabled || (expired && phase !== "iqama")) continue
+      var deadline = alertDeadline(prayer.prayerAt, phase, rule.minutes)
+      if (previousMs < deadline && deadline <= nowMs && nowMs - deadline <= 60000 &&
+          (phase !== "before" || nowMs < prayer.prayerAt)) {
+        result.push({
+          id: [cityKey(schedule.city), prayer.key, prayer.prayerAt, phase].join("|"),
+          key: prayer.key, phase: phase, prayerAt: prayer.prayerAt,
+          deadline: deadline, minutes: rule.minutes, time: prayer.time
+        })
+      }
+    }
+  }
+  return result
+}
+
+// The sender parses options in both text positions; the desktop may render markup.
+function notificationText(value) {
+  return String(value || "").replace(/^-/, " -").slice(0, 500)
+    .replace(/&/g, "＆").replace(/</g, "＜").replace(/>/g, "＞")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+}
+
+function notificationCommand(title, body) {
+  return ["omarchy-notification-send", "--app-name", "Prayer Times", "-g", "",
+    "-u", "normal", notificationText(title), notificationText(body)]
+}
+
+function localSoundPath(value, home) {
+  if (typeof value !== "string" || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value)) return ""
+  var path = value
+  if (path.indexOf("file:///") === 0) {
+    try { path = decodeURIComponent(path.slice(7)) } catch (e) { return "" }
+  } else if (path.indexOf("~/") === 0 && typeof home === "string") {
+    path = home + path.slice(1)
+  }
+  return path.charAt(0) === "/" && path.indexOf("//") !== 0 &&
+    !/[\u0000-\u001f\u007f]/.test(path) && /\.(wav|ogg|oga|flac|mp3)$/i.test(path) ? path : ""
+}
+
+function soundCommand(path) {
+  return ["pw-play", "--media-role", "Notification", "--", path]
 }

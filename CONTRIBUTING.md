@@ -4,7 +4,7 @@ Issues and pull requests are welcome. Include the Omarchy version, UI language,
 calculation method, and reproduction steps. Avoid posting your private location
 or complete shell configuration; a public test city is enough.
 
-Run the commands in README.md before proposing changes. Keep tests offline,
+Run `bash tools/check.sh` before proposing changes. Keep tests offline,
 bound and validate external input, render dynamic text with `Text.PlainText`,
 and never interpolate user or downloaded data into shell commands.
 
