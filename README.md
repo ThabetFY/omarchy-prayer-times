@@ -164,7 +164,7 @@ omarchy plugin remove thabetfy.prayer-times
 
 إذا بقيت قيم قديمة في الواجهة بعد التحديث، شغّل `omarchy restart shell`.
 
-لا تحتاج الإزالة إلى sudo، ولا تترك خدمة أو مهمة مجدولة. قد يبقى ملف التخزين
+لا تترك الإزالة خدمة أو مهمة مجدولة. قد يبقى ملف التخزين
 المؤقت؛ يمكنك حذفه اختياريًا بالأمر التالي:
 
 ```sh
@@ -331,7 +331,7 @@ omarchy plugin remove thabetfy.prayer-times
 
 If old values remain visible after updating, run `omarchy restart shell`.
 
-Removal needs no sudo and leaves no service or scheduled job. The cache may remain;
+Removal leaves no service or scheduled job. The cache may remain;
 optionally remove its file with:
 
 ```sh
